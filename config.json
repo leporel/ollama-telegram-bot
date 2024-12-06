@@ -1,0 +1,14 @@
+{
+    "botToken": "tg_bot_token",
+    "model": "hf.co/VlSav/vikhr_nemo_orpo_dostoevsky_12b_slerp-Q6_K-GGUF:Q6_K",
+    "serverUrl": "http://localhost:11434/",
+    "enableLog": true,
+    "chatGroupId": 123456789,
+    "systemPrompt": "You are a helpful assistant.",
+    "removeFromReplay": "assistant:",
+    "temperature": 0.9,
+    "mumCtx": 2048,
+    "greetingMessage": "Hello! I'm your personal AI assistant.",
+    "goodbyeMessage": "Goodbye!",
+    "triggerWords": ["@super_bot", "assistant"]
+}
