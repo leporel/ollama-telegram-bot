@@ -32,7 +32,6 @@ func validateChat(config *Config, c telebot.Context) bool {
 	return false
 }
 
-// removeLinks удаляет все HTTP и HTTPS ссылки из строки.
 func removeLinks(text string) string {
 	cleanedText := regexLinks.ReplaceAllString(text, "")
 
@@ -52,7 +51,6 @@ func (b *bot) containsTriggerWord(message string) bool {
 func (b *bot) botMiddleware(next telebot.HandlerFunc) telebot.HandlerFunc {
 	return func(c telebot.Context) error {
 
-		// Log
 		if b.config.EnableLog {
 			log.Printf("[%d] %d: %s", c.Chat().ID, c.Sender().ID, c.Message().Text)
 		}
@@ -89,29 +87,68 @@ func handlers(tgBot *telebot.Bot, bot *bot) {
 	// TODO Skip updates
 	// TODO Make persist storage for last messages?
 	tgBot.Handle(telebot.OnText, bot.botMiddleware(bot.handleMessage))
+	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
 }
 
+func (b *bot) handleAny(c telebot.Context) error {
+	
+	log.Println("handleAny: ", c.Message())
+
+	return nil
+}
 
 func (b *bot) handleMessage(c telebot.Context) error {
-
-	// Concat username and message
 	message := c.Text()
-	if c.Sender().Username != "" {
-		message = fmt.Sprintf("@%s: %s", c.Sender().Username, message)
-	} else if c.Sender().FirstName != "" {
-		message = fmt.Sprintf("%s: %s", c.Sender().FirstName, message)
-	}
-
-	// проверить что сообщение содержит полный его контест (реплаи, форварды и т.д.) и записать его текст в текущее сообщение
-	if c.Message().IsForwarded() || c.Message().IsReply() {
-		message = "User replay to message:" + c.Message().ReplyTo.Text + " " + message
-	}
 
 	message = strings.TrimSpace(removeLinks(message))
+	message = strings.TrimSpace(message)
 
 	if message == "" {
 		return nil
 	}
+
+	sender := ""
+	if c.Sender().Username != "" {
+		sender = fmt.Sprintf("@%s:", c.Sender().Username)
+	} else if c.Sender().FirstName != "" {
+		sender = fmt.Sprintf("%s:", c.Sender().FirstName)
+	}
+	message = sender + message
+
+	// проверить что сообщение содержит полный его контест (реплаи, форварды и т.д.) и записать его текст в текущее сообщение
+	if c.Message().IsForwarded() || c.Message().IsReply() {
+
+		extraMessage := ""
+
+		if c.Message().ReplyTo != nil {
+			switch {
+				case c.Message().ReplyTo.Text != "":
+					extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Text
+					break
+				case c.Message().ReplyTo.Caption != "":
+					extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Caption
+					break
+			}
+		}
+
+		if c.Message().Quote != nil && c.Message().Quote.Text != "" {
+			extraMessage = extraMessage + "User replay to:" + c.Message().Quote.Text
+		}
+
+		if c.Message().IsForwarded() {
+				switch {
+				case c.Message().OriginalSenderName != "":
+					extraMessage = fmt.Sprintf(`%s User forward this message from:"%s"`, extraMessage, c.Message().OriginalSenderName)
+					break
+				case c.Message().OriginalChat != nil && c.Message().OriginalChat.Type == telebot.ChatChannel:
+					extraMessage = fmt.Sprintf(`%s User forward this message from:"%s"`, extraMessage, c.Message().OriginalChat.Title)
+					break
+				}
+		}
+
+		message = extraMessage + " " + message
+	}
+
 
 	var userRole UserType
 
@@ -200,7 +237,7 @@ func (b *bot) handleMessage(c telebot.Context) error {
 	}
 
 	replayMesage = escapeMarkdownV2(replayMesage)
-
+	
 	err = c.Send(replayMesage, replayOpts)
 	if err != nil {
 			log.Printf("Send replay error: %v, replay string: %v\n", err, replayMesage)
