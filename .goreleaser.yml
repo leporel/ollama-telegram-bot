@@ -1,0 +1,43 @@
+# .goreleaser.yml
+version: 2
+
+project_name: ollama-telegram-bot
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    binary: bot
+    main: ./src/
+    # ldflags:
+    #   - -X github.com/leporel/wixtoyaollama-telegram-botndex/cmd.version={{.Env.BUILD_VERSION}}
+
+archives:
+  - format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - config.json
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

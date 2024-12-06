@@ -1,0 +1,42 @@
+name: goreleaser-snapshot
+
+on:
+  workflow_dispatch:
+#  push:
+#    branches:
+#      - 'master'
+#    tags:
+#      - '*'
+#  pull_request:
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    outputs:
+      output: ${{ steps.step1.outputs.version }}
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      -
+        name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.23.0
+      -
+        name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v2
+        with:
+          install-only: true
+      # - name: Get version
+      #   id: get_version
+      #   run: |
+      #     echo "BUILD_VERSION=$(cat VERSION)" >> $GITHUB_ENV
+      -
+        name: Publish to github
+        run: goreleaser release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        #  BUILD_VERSION: ${{ env.BUILD_VERSION }}
