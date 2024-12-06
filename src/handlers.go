@@ -183,7 +183,7 @@ func (b *bot) handleMessage(c telebot.Context) error {
 				NumCtx:      b.config.NumCtx,
 			},
 			Stream: false,
-			Format: "json",
+			// Format: "json",
 		},
 	}
 
