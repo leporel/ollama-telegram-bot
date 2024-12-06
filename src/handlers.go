@@ -90,12 +90,6 @@ func handlers(tgBot *telebot.Bot, bot *bot) {
 	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
 }
 
-func (b *bot) handleAny(c telebot.Context) error {
-	
-	log.Println("handleAny: ", c.Message())
-
-	return nil
-}
 
 func (b *bot) handleMessage(c telebot.Context) error {
 	message := c.Text()
@@ -109,11 +103,12 @@ func (b *bot) handleMessage(c telebot.Context) error {
 
 	sender := ""
 	if c.Sender().Username != "" {
-		sender = fmt.Sprintf("@%s:", c.Sender().Username)
-	} else if c.Sender().FirstName != "" {
-		sender = fmt.Sprintf("%s:", c.Sender().FirstName)
+		sender = fmt.Sprintf("@%s", c.Sender().Username)
+	} 
+	if c.Sender().FirstName != "" {
+		sender = fmt.Sprintf("%s (%s)", sender, c.Sender().FirstName)
 	}
-	message = sender + message
+	message = sender + ": " + message
 
 	// проверить что сообщение содержит полный его контест (реплаи, форварды и т.д.) и записать его текст в текущее сообщение
 	if c.Message().IsForwarded() || c.Message().IsReply() {
@@ -224,11 +219,14 @@ func (b *bot) handleMessage(c telebot.Context) error {
 
 	b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: replayMesage})
 
+	isRemoveFromReplay := strings.Index(replayMesage, b.config.RemoveFromReplay)
 	replayMesage = strings.ReplaceAll(replayMesage, b.config.RemoveFromReplay, "")
-
-	index := strings.Index(replayMesage, ":")
-	if index != -1 && index < 20 {
-		replayMesage = replayMesage[index+1:]
+	// TODO remove (fix when message contains different substr (exmaple - "Assistant:" got - "Ассистант:" ))
+	if isRemoveFromReplay < -1 {
+		index := strings.Index(replayMesage, ":")
+		if (index != -1 && index != 0) && index < 20 {
+			replayMesage = replayMesage[index+1:]
+		}
 	}
 
 	replayOpts := &telebot.SendOptions{
