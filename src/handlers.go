@@ -83,28 +83,20 @@ func (b *bot) isNeedProcess(message string, c telebot.Context) bool {
 	return false
 }
 
-func handlers(tgBot *telebot.Bot, bot *bot) {
-	// TODO Skip updates
-	// TODO Make persist storage for last messages?
-	tgBot.Handle(telebot.OnText, bot.botMiddleware(bot.handleMessage))
-	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
-}
-
-
-func (b *bot) handleMessage(c telebot.Context) error {
+func (b *bot) processInputMessage(c telebot.Context) string {
 	message := c.Text()
 
 	message = strings.TrimSpace(removeLinks(message))
 	message = strings.TrimSpace(message)
 
 	if message == "" {
-		return nil
+		return ""
 	}
 
 	sender := ""
 	if c.Sender().Username != "" {
 		sender = fmt.Sprintf("@%s", c.Sender().Username)
-	} 
+	}
 	if c.Sender().FirstName != "" {
 		sender = fmt.Sprintf("%s (%s)", sender, c.Sender().FirstName)
 	}
@@ -117,12 +109,12 @@ func (b *bot) handleMessage(c telebot.Context) error {
 
 		if c.Message().ReplyTo != nil {
 			switch {
-				case c.Message().ReplyTo.Text != "":
-					extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Text
-					break
-				case c.Message().ReplyTo.Caption != "":
-					extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Caption
-					break
+			case c.Message().ReplyTo.Text != "":
+				extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Text
+				break
+			case c.Message().ReplyTo.Caption != "":
+				extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Caption
+				break
 			}
 		}
 
@@ -131,19 +123,96 @@ func (b *bot) handleMessage(c telebot.Context) error {
 		}
 
 		if c.Message().IsForwarded() {
-				switch {
-				case c.Message().OriginalSenderName != "":
-					extraMessage = fmt.Sprintf(`%s User forward this message from:"%s"`, extraMessage, c.Message().OriginalSenderName)
-					break
-				case c.Message().OriginalChat != nil && c.Message().OriginalChat.Type == telebot.ChatChannel:
-					extraMessage = fmt.Sprintf(`%s User forward this message from:"%s"`, extraMessage, c.Message().OriginalChat.Title)
-					break
-				}
+			switch {
+			case c.Message().OriginalSenderName != "":
+				extraMessage = fmt.Sprintf(`%s User forward this message from:"%s"`, extraMessage, c.Message().OriginalSenderName)
+				break
+			case c.Message().OriginalChat != nil && c.Message().OriginalChat.Type == telebot.ChatChannel:
+				extraMessage = fmt.Sprintf(`%s User forward this message from:"%s"`, extraMessage, c.Message().OriginalChat.Title)
+				break
+			}
 		}
 
 		message = extraMessage + " " + message
 	}
 
+	return message
+}
+
+func (b *bot) processOutputMessage(msg string) string {
+
+	replayMesage := msg
+
+	// Если ответ пришел в ввиде json'на
+	var tmp map[string]interface{}
+	if err := json.Unmarshal([]byte(replayMesage), &tmp); err == nil {
+		for _, v := range tmp {
+			msg, ok := v.(string)
+			if !ok {
+				log.Println("ERROR: When cast string")
+			} else {
+				replayMesage = msg
+			}
+		}
+	}
+
+	isRemoveFromReplay := strings.Index(replayMesage, b.config.RemoveFromReplay)
+	replayMesage = strings.ReplaceAll(replayMesage, b.config.RemoveFromReplay, "")
+	// TODO remove (fix when message contains different substr (exmaple - "Assistant:" got - "Ассистант:" ))
+	if isRemoveFromReplay < -1 {
+		index := strings.Index(replayMesage, ":")
+		if (index != -1 && index != 0) && index < 20 {
+			replayMesage = replayMesage[index+1:]
+		}
+	}
+
+	return replayMesage
+}
+
+
+func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
+	systemMessage := ollama.MakeMessage(string(UserTypeSystem), b.config.SystemPrompt)
+
+	messages := []ollama.Message{systemMessage}
+
+	for _, msg := range b.chatContexts.History.GetAll() {
+		messages = append(messages, ollama.MakeMessage(string(msg.UserType), msg.Message))
+	}
+
+	messages = append(messages, ollama.MakeMessage(string(newMsg.UserType),newMsg.Message))
+
+	payload := &ollama.ChatRequest{
+		Model:    b.config.Model,
+		Messages: messages,
+		AdvancedParams: ollama.AdvancedParams{
+			Options: ollama.Options{
+				Temperature: b.config.Temperature,
+				NumCtx:      b.config.NumCtx,
+			},
+			Stream: false,
+			// Format: "json",
+		},
+	}
+
+	return payload
+}
+
+
+func handlers(tgBot *telebot.Bot, bot *bot) {
+	// TODO Skip updates
+	// TODO Make persist storage for last messages?
+	tgBot.Handle(telebot.OnText, bot.botMiddleware(bot.handleMessage))
+	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
+}
+
+
+func (b *bot) handleMessage(c telebot.Context) error {
+
+	message := b.processInputMessage(c)
+
+	if message == "" {
+		return nil
+	}
 
 	var userRole UserType
 
@@ -160,37 +229,18 @@ func (b *bot) handleMessage(c telebot.Context) error {
 		Message:  message,
 	}
 
-	b.chatContexts.History.Add(newMessage)
-
 	if !b.isNeedProcess(message, c) {
 		return nil
-	}
-
-	systemMessage := ollama.MakeMessage(string(UserTypeSystem), b.config.SystemPrompt)
-
-	messages := []ollama.Message{systemMessage}
-
-	for _, msg := range b.chatContexts.History.GetAll() {
-		messages = append(messages, ollama.MakeMessage(string(msg.UserType), msg.Message))
-	}
-
-	payload := &ollama.ChatRequest{
-		Model:    b.config.Model,
-		Messages: messages,
-		AdvancedParams: ollama.AdvancedParams{
-			Options: ollama.Options{
-				Temperature: b.config.Temperature,
-				NumCtx:      b.config.NumCtx,
-			},
-			Stream: false,
-			// Format: "json",
-		},
 	}
 
 	response := make(chan string)
 	defer close(response)
 
+	payload :=b.makeChatRequest(newMessage)
+	b.chatContexts.History.Add(newMessage)
+
 	b.llmChan <- &data{payload, c, response}
+
 
 	err := c.Notify(telebot.Typing)
 	if err != nil {
@@ -204,50 +254,27 @@ func (b *bot) handleMessage(c telebot.Context) error {
 		return nil
 	}
 
-	// Если ответ пришел в ввиде json'на
-	var tmp map[string]interface{}
-	if err := json.Unmarshal([]byte(replayMesage), &tmp); err == nil {
-		for _, v := range tmp {
-			msg, ok := v.(string)
-			if !ok {
-				log.Println("ERROR: When cast string")
-			} else {
-				replayMesage = msg
-			}
-		}
-	}
-
-	b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: replayMesage})
-
-	isRemoveFromReplay := strings.Index(replayMesage, b.config.RemoveFromReplay)
-	replayMesage = strings.ReplaceAll(replayMesage, b.config.RemoveFromReplay, "")
-	// TODO remove (fix when message contains different substr (exmaple - "Assistant:" got - "Ассистант:" ))
-	if isRemoveFromReplay < -1 {
-		index := strings.Index(replayMesage, ":")
-		if (index != -1 && index != 0) && index < 20 {
-			replayMesage = replayMesage[index+1:]
-		}
-	}
+	replayMesage = b.processOutputMessage(replayMesage)
 
 	replayOpts := &telebot.SendOptions{
 		ParseMode: telebot.ModeMarkdownV2,
 		ReplyTo:   c.Message(),
 	}
 
-	replayMesage = escapeMarkdownV2(replayMesage)
-	
-	err = c.Send(replayMesage, replayOpts)
+	err = c.Send(escapeMarkdownV2(replayMesage), replayOpts)
 	if err != nil {
-			log.Printf("Send replay error: %v, replay string: %v\n", err, replayMesage)
+		log.Printf("Send replay error: %v, replay string: %v\n", err, replayMesage)
+		return err
 	}
 
-	return err
+	b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: replayMesage})
+
+	return nil
 }
 
 func (b *bot) processOllama() {
 	// Listen channel for new requests
 	for data := range b.llmChan {
-		time.Sleep(3 * time.Second)
 		log.Println("Process ollama request")
 
 		resp, err := b.sendRequestOllama(data.request)
@@ -259,6 +286,8 @@ func (b *bot) processOllama() {
 		}
 
 		data.response <- resp
+
+		time.Sleep(5 * time.Second)
 	}
 }
 
@@ -317,12 +346,11 @@ func (b *bot) sendRequestOllama(payload *ollama.ChatRequest) (string, error) {
 
 // Регулярное выражение для поиска части (...) встроенных ссылок и кастомных эмодзи
 // TODO FIX Не ловит строку типа [text](lnk://c.c/pa=)_\), думая что первая скобка закрывающая
-var inlineLinkRegex = regexp.MustCompile(`\[.*?\]\((.*?)\)`) 
+var inlineLinkRegex = regexp.MustCompile(`\[.*?\]\((.*?)\)`)
 
 // Регулярное выражение для поиска блоков кода
 var codeBlockRegex = regexp.MustCompile("(?s)```.*?```")
 var lineCodeRegex = regexp.MustCompile("`[^`\n]+`")
-
 
 func escapeMarkdownV2(text string) string {
 	// Список символов, которые нужно экранировать
@@ -331,7 +359,7 @@ func escapeMarkdownV2(text string) string {
 	linkMap := make(map[string]string)
 	codeBlockMap := make(map[string]string)
 	inlineCodeMap := make(map[string]string)
-	
+
 	// Замена оригинальных блоков на заполнители
 	var linkIndex int
 	text = inlineLinkRegex.ReplaceAllStringFunc(text, func(link string) string {
@@ -357,16 +385,15 @@ func escapeMarkdownV2(text string) string {
 		return placeholder
 	})
 
-
 	// Экранирование символов внутри заполнителей
 	for placeholder, link := range linkMap {
 		match := inlineLinkRegex.FindStringSubmatch(link)
 		if len(match) > 1 {
 			part := match[1]
 
-			part = strings.ReplaceAll(part, ")", "\\)")
 			part = strings.ReplaceAll(part, "\\", "\\\\")
-
+			part = strings.ReplaceAll(part, ")", "\\)")
+			
 			link = strings.Replace(link, match[1], part, 1)
 			linkMap[placeholder] = link
 		}
@@ -376,18 +403,20 @@ func escapeMarkdownV2(text string) string {
 		block = strings.TrimPrefix(block, "```")
 		block = strings.TrimSuffix(block, "```")
 
-		block = strings.ReplaceAll(block, "`", "\\`")
 		block = strings.ReplaceAll(block, "\\", "\\\\")
-		codeBlockMap[placeholder] = "```"+block+"```"	
+		block = strings.ReplaceAll(block, "`", "\\`")
+
+		codeBlockMap[placeholder] = "```" + block + "```"
 	}
 
 	for placeholder, code := range inlineCodeMap {
 		code = strings.TrimPrefix(code, "`")
 		code = strings.TrimSuffix(code, "`")
 
-		code = strings.ReplaceAll(code, "`", "\\`")
 		code = strings.ReplaceAll(code, "\\", "\\\\")
-		inlineCodeMap[placeholder] = "`"+code+"`"	
+		code = strings.ReplaceAll(code, "`", "\\`")
+		
+		inlineCodeMap[placeholder] = "`" + code + "`"
 	}
 
 	text = strings.ReplaceAll(text, "\\", `\\`)
