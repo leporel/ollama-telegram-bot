@@ -41,12 +41,12 @@ func main() {
 		}
 	}
 
-	fmt.Printf("Config file: %v\n", configFile)
-
 	// Load config from file or use default if not found
 	if configFile == "" {
 		configFile = "config.json"
 	}
+
+	log.Printf("Config file: %v\n", configFile)
 
 	// Config
 	config, err := loadConfig(configFile)
