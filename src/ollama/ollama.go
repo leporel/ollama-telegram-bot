@@ -44,7 +44,7 @@ type Tool struct {
 
 type AdvancedParams struct {
 	Format    string  `json:"format,omitempty"`
-	Options   Options `json:"options,omitempty"`
+	Options   *Options `json:"options,omitempty"`
 	Stream    bool    `json:"stream"`
 	KeepAlive string  `json:"keep_alive,omitempty"`
 }

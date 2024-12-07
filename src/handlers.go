@@ -185,7 +185,7 @@ func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
 		Model:    b.config.Model,
 		Messages: messages,
 		AdvancedParams: ollama.AdvancedParams{
-			Options: ollama.Options{
+			Options: &ollama.Options{
 				Temperature: b.config.Temperature,
 				NumCtx:      b.config.NumCtx,
 			},
