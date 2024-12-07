@@ -199,8 +199,6 @@ func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
 
 
 func handlers(tgBot *telebot.Bot, bot *bot) {
-	// TODO Skip updates
-	// TODO Make persist storage for last messages?
 	tgBot.Handle(telebot.OnText, bot.botMiddleware(bot.handleMessage))
 	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
 }
@@ -229,6 +227,13 @@ func (b *bot) handleMessage(c telebot.Context) error {
 		Message:  message,
 	}
 
+	b.chatContexts.History.Add(newMessage)
+
+	// Skip old message when receive missing updates
+	if c.Message().Time().Before(b.startTime) {
+		return nil
+	}
+
 	if !b.isNeedProcess(message, c) {
 		return nil
 	}
@@ -237,15 +242,7 @@ func (b *bot) handleMessage(c telebot.Context) error {
 	defer close(response)
 
 	payload :=b.makeChatRequest(newMessage)
-	b.chatContexts.History.Add(newMessage)
-
 	b.llmChan <- &data{payload, c, response}
-
-
-	err := c.Notify(telebot.Typing)
-	if err != nil {
-		log.Printf("Send Notify error: %v\n", err)
-	}
 
 	replayMesage := <-response
 
@@ -261,7 +258,7 @@ func (b *bot) handleMessage(c telebot.Context) error {
 		ReplyTo:   c.Message(),
 	}
 
-	err = c.Send(escapeMarkdownV2(replayMesage), replayOpts)
+	err := c.Send(escapeMarkdownV2(replayMesage), replayOpts)
 	if err != nil {
 		log.Printf("Send replay error: %v, replay string: %v\n", err, replayMesage)
 		return err
@@ -276,6 +273,11 @@ func (b *bot) processOllama() {
 	// Listen channel for new requests
 	for data := range b.llmChan {
 		log.Println("Process ollama request")
+
+		err := data.ctx.Notify(telebot.Typing)
+		if err != nil {
+			log.Printf("Send Notify error: %v\n", err)
+		}
 
 		resp, err := b.sendRequestOllama(data.request)
 
@@ -342,6 +344,20 @@ func (b *bot) sendRequestOllama(payload *ollama.ChatRequest) (string, error) {
 	}
 
 	return res, nil
+}
+
+
+func (b *bot) SendMessageToChatGroup(chatID int64, msg string) error {
+	if chatID != 0 {
+		if _, err := b.tgBot.Send(&telebot.Chat{ID: chatID}, msg, telebot.Silent); err != nil {
+			return fmt.Errorf("Cant send message: %v", err)
+		} 
+		if b.config.EnableLog {
+			log.Printf("Message sent to chat group: %v msg: %v \n", chatID, msg)
+		}
+	}
+	b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: msg})
+	return nil
 }
 
 // Регулярное выражение для поиска части (...) встроенных ссылок и кастомных эмодзи

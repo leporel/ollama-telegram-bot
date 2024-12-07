@@ -1,3 +1,4 @@
 bot.exe
 /test
 /.vscode
+*_history.json

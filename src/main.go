@@ -8,14 +8,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/jeromeberg/ollama-telegram-bot/src/ollama"
 	"gopkg.in/telebot.v3"
 )
 
 type bot struct {
+	tgBot        *telebot.Bot
 	config       *Config
 	chatContexts *ChatContext
 	llmChan      chan *data
+	startTime    time.Time
 }
 
 type data struct {
@@ -26,8 +29,8 @@ type data struct {
 
 func main() {
 
-	configFile:= ""
-	
+	configFile := ""
+
 	// Get config file from command line argument -c or use default
 	if len(os.Args) > 1 {
 		for i := range os.Args {
@@ -64,13 +67,15 @@ func main() {
 		log.SetFlags(log.Ldate | log.Ltime)
 	}
 
-	fmt.Printf("Config loaded: %v\n", config)
+	if config.EnableLog {
+		log.Printf("Config loaded:\n%s\n", spew.Sprintf("%+v", *config))
+	}
 
 	// Telegram bot
 	tgBot, err := telebot.NewBot(telebot.Settings{
-		Token:  config.BotToken,
+		Token: config.BotToken,
 		Poller: &telebot.LongPoller{
-			Timeout: 10 * time.Second,
+			Timeout:      10 * time.Second,
 			LastUpdateID: 0,
 		},
 	})
@@ -82,23 +87,25 @@ func main() {
 
 	chatContexts := &ChatContext{
 		Chat:    config.ChatGroupID,
-		History: NewBoundedList(30),
+		History: NewBoundedList(50, fmt.Sprintf("./%d_history.json", config.ChatGroupID), config.EnableSaveHistory),
 	}
 
 	chatBot := &bot{
+		tgBot:        tgBot,
 		config:       config,
 		chatContexts: chatContexts,
 		llmChan:      make(chan *data, 1),
+		startTime:    time.Now(),
 	}
 
 	// Handlers
 	handlers(tgBot, chatBot)
-	
+
 	log.Println("ollama-telegram-bot running...")
 	go chatBot.processOllama()
 
 	// Send hello to chat group
-	err = sendMessageToChatGroup(tgBot, config.ChatGroupID, config.GreetingMessage)
+	err = chatBot.SendMessageToChatGroup(config.ChatGroupID, config.GreetingMessage)
 	if err != nil {
 		log.Println(err)
 	}
@@ -111,11 +118,17 @@ func main() {
 		s := <-sig
 		log.Println("Received interrupt signal:", s)
 		log.Println("Stopping bot...")
-		
+
 		// Send goodbye to chat group
-		err = sendMessageToChatGroup(tgBot, config.ChatGroupID, config.GoodbyeMessage)
+		err = chatBot.SendMessageToChatGroup(config.ChatGroupID, config.GoodbyeMessage)
 		if err != nil {
 			log.Println(err)
+		}
+
+		if config.EnableSaveHistory {
+			if err = chatContexts.History.SaveToFile(); err != nil {
+				log.Println(err)
+			}
 		}
 
 		tgBot.Stop()
@@ -124,14 +137,4 @@ func main() {
 	}()
 
 	tgBot.Start()
-}
-
-func sendMessageToChatGroup(tgBot *telebot.Bot, chatID int64, msg string) error {
-	if chatID != 0 {
-		if _, err := tgBot.Send(&telebot.Chat{ID: chatID}, msg, telebot.Silent); err != nil {
-			return fmt.Errorf("Cant send greeting message: %v", err)
-		} 
-		log.Printf("Message sent to chat group: %v msg: %v \n", chatID, msg)
-	}
-	return nil
 }

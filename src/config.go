@@ -8,18 +8,19 @@ import (
 )
 
 type Config struct {
-	BotToken         string   `json:"botToken"`
-	Model            string   `json:"model"`
-	ServerURL        string   `json:"serverUrl"`
-	EnableLog        bool     `json:"enableLog"`
-	ChatGroupID      int64    `json:"chatGroupId"`
-	SystemPrompt     string   `json:"systemPrompt"`
-	Temperature      float64  `json:"temperature"`
-	NumCtx           int      `json:"numCtx"`
-	GreetingMessage  string   `json:"greetingMessage"`
-	GoodbyeMessage   string   `json:"goodbyeMessage"`
-	TriggerWords     []string `json:"triggerWords"`
-	RemoveFromReplay string   `json:"removeFromReplay"`
+	BotToken          string   `json:"botToken"`
+	Model             string   `json:"model"`
+	ServerURL         string   `json:"serverUrl"`
+	EnableLog         bool     `json:"enableLog"`
+	ChatGroupID       int64    `json:"chatGroupId"`
+	SystemPrompt      string   `json:"systemPrompt"`
+	Temperature       float64  `json:"temperature"`
+	NumCtx            int      `json:"numCtx"`
+	GreetingMessage   string   `json:"greetingMessage"`
+	GoodbyeMessage    string   `json:"goodbyeMessage"`
+	TriggerWords      []string `json:"triggerWords"`
+	RemoveFromReplay  string   `json:"removeFromReplay"`
+	EnableSaveHistory bool     `json:"enableSaveHistory"`
 }
 
 func loadConfig(filename string) (*Config, error) {
