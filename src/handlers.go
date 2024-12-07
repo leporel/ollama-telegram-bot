@@ -110,16 +110,17 @@ func (b *bot) processInputMessage(c telebot.Context) string {
 		if c.Message().ReplyTo != nil {
 			switch {
 			case c.Message().ReplyTo.Text != "":
-				extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Text
+				// extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Text
+				extraMessage = fmt.Sprintf("%s User replay to:\"%s\"", extraMessage, c.Message().ReplyTo.Text)
 				break
 			case c.Message().ReplyTo.Caption != "":
-				extraMessage = extraMessage + "User replay to:" + c.Message().ReplyTo.Caption
+				extraMessage = fmt.Sprintf("%s User replay to:\"%s\"", extraMessage, c.Message().ReplyTo.Caption)
 				break
 			}
 		}
 
 		if c.Message().Quote != nil && c.Message().Quote.Text != "" {
-			extraMessage = extraMessage + "User replay to:" + c.Message().Quote.Text
+			extraMessage = fmt.Sprintf("%s User replay to:\"%s\"", extraMessage, c.Message().Quote.Text)
 		}
 
 		if c.Message().IsForwarded() {
@@ -133,7 +134,7 @@ func (b *bot) processInputMessage(c telebot.Context) string {
 			}
 		}
 
-		message = extraMessage + " " + message
+		message = strings.TrimSpace(extraMessage) + " " + message
 	}
 
 	return message
