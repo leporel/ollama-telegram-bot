@@ -11,5 +11,6 @@
     "greetingMessage": "Hello! I'm your personal AI assistant.",
     "goodbyeMessage": "Goodbye!",
     "triggerWords": ["@super_bot", "assistant"],
+    "historySize": 50,
     "enableSaveHistory": false
 }

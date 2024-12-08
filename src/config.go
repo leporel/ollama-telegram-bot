@@ -20,6 +20,7 @@ type Config struct {
 	GoodbyeMessage    string   `json:"goodbyeMessage"`
 	TriggerWords      []string `json:"triggerWords"`
 	RemoveFromReplay  string   `json:"removeFromReplay"`
+	HistorySize       int      `json:"historySize"`
 	EnableSaveHistory bool     `json:"enableSaveHistory"`
 }
 

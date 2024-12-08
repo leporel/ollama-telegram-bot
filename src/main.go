@@ -87,7 +87,7 @@ func main() {
 
 	chatContexts := &ChatContext{
 		Chat:    config.ChatGroupID,
-		History: NewBoundedList(50, fmt.Sprintf("./%d_history.json", config.ChatGroupID), config.EnableSaveHistory),
+		History: NewBoundedList(config.HistorySize, fmt.Sprintf("./%d_history.json", config.ChatGroupID), config.EnableSaveHistory),
 	}
 
 	chatBot := &bot{
