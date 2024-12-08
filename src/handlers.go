@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/jeromeberg/ollama-telegram-bot/src/ollama"
@@ -158,6 +159,7 @@ func (b *bot) processInputMessage(c telebot.Context) string {
 	message := c.Text()
 
 	message = strings.TrimSpace(removeLinks(message))
+	message = strings.TrimSuffix(message, "@"+c.Bot().Me.Username)
 	message = strings.TrimSpace(message)
 
 	if c.Message().PreviewOptions != nil && !c.Message().PreviewOptions.Disabled {
@@ -341,10 +343,10 @@ func (b *bot) processCommands(c telebot.Context) (string, bool) {
 			return "", false
 		}
 
-		old, ok := b.chatContexts.Memory.Remove(index - 1); 
+		old, ok := b.chatContexts.Memory.Remove(index - 1)
 		if !ok {
 			return "", false
-		} 
+		}
 
 		rs = fmt.Sprintf("Забыл: %s", old)
 		return rs, true
@@ -360,17 +362,11 @@ func handlers(tgBot *telebot.Bot, bot *bot) {
 }
 
 func (b *bot) handleMessage(c telebot.Context) error {
-	replayOpts := &telebot.SendOptions{
-		ParseMode: telebot.ModeMarkdownV2,
-		ReplyTo:   c.Message(),
-	}
-
 	cmdResult, cmdOk := b.processCommands(c)
 
 	if cmdOk {
-		err := c.Send(escapeMarkdownV2(cmdResult), replayOpts)
+		err := b.send(cmdResult, c)
 		if err != nil {
-			log.Printf("Send replay error: %v, replay string: %v\n", err, cmdResult)
 			return err
 		}
 		return nil
@@ -426,31 +422,70 @@ func (b *bot) handleMessage(c telebot.Context) error {
 	var storeReplay bool
 
 	switch {
-		case regexGif.MatchString(replayMesage): 
-			match := regexGif.FindStringSubmatch(replayMesage)
-			if len(match) > 1 {
-				res, err := b.giphy.Translate(strings.Split(match[1], " "))
-				if err != nil {
-				  log.Printf("Error: %v", err)
-				  return nil
-				}
-	
-				replay = &telebot.Animation{File: telebot.File{FileURL: res.Data.MediaURL()}, Caption: "Powered by GIPHY"}
+	case regexGif.MatchString(replayMesage):
+		match := regexGif.FindStringSubmatch(replayMesage)
+		if len(match) > 1 {
+			res, err := b.giphy.Translate(strings.Split(match[1], " "))
+			if err != nil {
+				log.Printf("Error: %v", err)
+				return nil
 			}
-		
-		default:
-			replay = escapeMarkdownV2(replayMesage)
-			storeReplay = true
+
+			replay = &telebot.Animation{File: telebot.File{FileURL: res.Data.MediaURL()}, Caption: "Powered by GIPHY"}
+		}
+
+	default:
+		replay = replayMesage
+		storeReplay = true
 	}
 
-	err := c.Send(replay, replayOpts)
+	err := b.send(replay, c)
 	if err != nil {
-		log.Printf("Send replay error: %v, replay string: %v\n", err, replay)
 		return err
 	}
 
 	if storeReplay {
 		b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: replayMesage})
+	}
+
+	return nil
+}
+
+func (b *bot) send(replay any, c telebot.Context) error {
+	replayOpts := &telebot.SendOptions{
+		ParseMode: telebot.ModeMarkdownV2,
+		ReplyTo:   c.Message(),
+	}
+
+	rpls := []any{}
+
+	switch v := replay.(type) {
+	case string:
+		v = escapeMarkdownV2(v)
+
+		if utf8.RuneCountInString(v) > 4000 {
+			runes := []rune(v)
+			for i := 0; i < len(runes); i += 4000 {
+				end := i + 4000
+				if end > len(runes) {
+					end = len(runes)
+				}
+				rpls = append(rpls, string(runes[i:end]))
+			}
+		} else {
+			rpls = append(rpls, v)
+		}
+
+	case *telebot.Animation:
+		rpls = append(rpls, v)
+	}
+
+	for _, r := range rpls {
+		err := c.Send(r, replayOpts)
+		if err != nil {
+			log.Printf("Send replay error: %v, replay string: %v\n", err, replay)
+			return err
+		}
 	}
 
 	return nil

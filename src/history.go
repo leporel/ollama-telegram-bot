@@ -41,7 +41,7 @@ func (m *Memory) GetList() string {
 
 	rs := ""
 	for i, v := range m.Data {
-		rs = fmt.Sprintf("%d. %s\n", i+1, v)
+		rs += fmt.Sprintf("%d. %s\n",i+1, v)
 	}
 	return rs
 }
