@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	// TODO v4 ?
 	"gopkg.in/telebot.v3"
 )
+
+var botMentionKey = "self_mention"
 
 // Регулярное выражение для поиска всех форматов URL: http://, https://, www.
 var regexLinks = regexp.MustCompile(`\b(?:http|https|www)\S+`)
@@ -63,12 +66,25 @@ func (b *bot) botMiddleware(next telebot.HandlerFunc) telebot.HandlerFunc {
 			return nil
 		}
 
+		if c.Message() == nil {
+			return nil
+		}
+
+		if len(c.Message().Entities) > 0 &&
+			c.Message().Entities[0].Type == telebot.EntityMention &&
+			c.Message().Entities[0].Offset == 0 &&
+			strings.Contains(c.Text(), "@"+c.Bot().Me.Username) {
+
+			c.Set(botMentionKey, true)
+		}
+
 		return next(c)
 	}
 }
 
 // Check message for trigger LLM
-func (b *bot) isNeedProcess(message string, c telebot.Context) bool {
+func (b *bot) isNeedProcessAnswer(message string, c telebot.Context) bool {
+
 	if c.Bot().Me.ID == c.Message().Sender.ID {
 		return false
 	}
@@ -78,6 +94,10 @@ func (b *bot) isNeedProcess(message string, c telebot.Context) bool {
 	}
 
 	if c.Message().IsReply() && int(c.Message().ReplyTo.Sender.ID) == int(c.Bot().Me.ID) {
+		return true
+	}
+
+	if c.Get(botMentionKey) != nil {
 		return true
 	}
 
@@ -233,6 +253,10 @@ func (b *bot) processOutputMessage(msg string) string {
 func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
 	systemMessage := ollama.MakeMessage(string(UserTypeSystem), b.config.SystemPrompt)
 
+	if len(b.chatContexts.Memory.Data) > 0 {
+		systemMessage.Content = fmt.Sprintf("%s\nТебя просили запомнить:\n%s", systemMessage.Content, b.chatContexts.Memory.GetList())
+	}
+
 	messages := []ollama.Message{systemMessage}
 
 	for _, msg := range b.chatContexts.History.GetAll() {
@@ -257,12 +281,98 @@ func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
 	return payload
 }
 
+func (b *bot) processCommands(c telebot.Context) (string, bool) {
+	isMentioned, ok := c.Get(botMentionKey).(bool)
+	if !ok {
+		return "", false
+	}
+
+	if !isMentioned {
+		return "", false
+	}
+
+	text := removeLinks(c.Text())
+	rs := ""
+
+	// Trim mention
+	text = strings.TrimPrefix(text, "@")
+
+	cmds := strings.SplitN(text, " ", 2)
+	if len(cmds) < 2 {
+		return "", false
+	}
+	if cmds[0] != c.Bot().Me.Username {
+		return "", false
+	}
+
+	text = strings.TrimSpace(strings.TrimSpace(cmds[1]))
+
+	switch {
+	case strings.HasPrefix(text, "что ты помнишь"):
+		if len(b.chatContexts.Memory.Data) == 0 {
+			return "", false
+		}
+
+		rs = fmt.Sprintf("Меня просили запомнить:\n%s", b.chatContexts.Memory.GetList())
+		return rs, true
+
+	case strings.HasPrefix(text, "запомни"):
+
+		cmdText := strings.SplitN(text, " ", 2)
+		if len(cmdText) < 2 {
+			return "", false
+		}
+
+		b.chatContexts.Memory.Add(cmdText[1])
+		rs = fmt.Sprintf("Теперь я помню: %s", cmdText[1])
+		return rs, true
+
+	case strings.HasPrefix(text, "забудь"):
+
+		cmdText := strings.SplitN(text, " ", 2)
+		if len(cmdText) < 2 {
+			return "", false
+		}
+
+		index, err := strconv.Atoi(cmdText[1])
+		if err != nil {
+			return "", false
+		}
+
+		old, ok := b.chatContexts.Memory.Remove(index - 1); 
+		if !ok {
+			return "", false
+		} 
+
+		rs = fmt.Sprintf("Забыл: %s", old)
+		return rs, true
+
+	}
+
+	return "", false
+}
+
 func handlers(tgBot *telebot.Bot, bot *bot) {
 	tgBot.Handle(telebot.OnText, bot.botMiddleware(bot.handleMessage))
 	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
 }
 
 func (b *bot) handleMessage(c telebot.Context) error {
+	replayOpts := &telebot.SendOptions{
+		ParseMode: telebot.ModeMarkdownV2,
+		ReplyTo:   c.Message(),
+	}
+
+	cmdResult, cmdOk := b.processCommands(c)
+
+	if cmdOk {
+		err := c.Send(escapeMarkdownV2(cmdResult), replayOpts)
+		if err != nil {
+			log.Printf("Send replay error: %v, replay string: %v\n", err, cmdResult)
+			return err
+		}
+		return nil
+	}
 
 	message := b.processInputMessage(c)
 
@@ -292,7 +402,7 @@ func (b *bot) handleMessage(c telebot.Context) error {
 		return nil
 	}
 
-	if !b.isNeedProcess(message, c) {
+	if !b.isNeedProcessAnswer(message, c) {
 		return nil
 	}
 
@@ -310,11 +420,6 @@ func (b *bot) handleMessage(c telebot.Context) error {
 	}
 
 	replayMesage = b.processOutputMessage(replayMesage)
-
-	replayOpts := &telebot.SendOptions{
-		ParseMode: telebot.ModeMarkdownV2,
-		ReplyTo:   c.Message(),
-	}
 
 	err := c.Send(escapeMarkdownV2(replayMesage), replayOpts)
 	if err != nil {

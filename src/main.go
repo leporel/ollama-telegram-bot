@@ -85,10 +85,7 @@ func main() {
 		return
 	}
 
-	chatContexts := &ChatContext{
-		Chat:    config.ChatGroupID,
-		History: NewBoundedList(config.HistorySize, fmt.Sprintf("./%d_history.json", config.ChatGroupID), config.EnableSaveHistory),
-	}
+	chatContexts := NewChatContext(config.ChatGroupID, config.HistorySize, fmt.Sprintf("./%d_history.json", config.ChatGroupID), config.EnableSaveHistory)
 
 	chatBot := &bot{
 		tgBot:        tgBot,
@@ -112,7 +109,7 @@ func main() {
 
 	// Handle interapt signal
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
 	go func() {
 		s := <-sig
@@ -126,7 +123,7 @@ func main() {
 		}
 
 		if config.EnableSaveHistory {
-			if err = chatContexts.History.SaveToFile(); err != nil {
+			if err = chatContexts.SaveToFile(); err != nil {
 				log.Println(err)
 			}
 		}
