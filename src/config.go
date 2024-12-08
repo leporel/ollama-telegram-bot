@@ -22,6 +22,7 @@ type Config struct {
 	RemoveFromReplay  string   `json:"removeFromReplay"`
 	HistorySize       int      `json:"historySize"`
 	EnableSaveHistory bool     `json:"enableSaveHistory"`
+	GiphyAPIKey      string    `json:"giphyAPIKey"`
 }
 
 func loadConfig(filename string) (*Config, error) {

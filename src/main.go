@@ -10,6 +10,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/jeromeberg/ollama-telegram-bot/src/ollama"
+	"github.com/peterhellberg/giphy"
 	"gopkg.in/telebot.v3"
 )
 
@@ -19,6 +20,7 @@ type bot struct {
 	chatContexts *ChatContext
 	llmChan      chan *data
 	startTime    time.Time
+	giphy 		*giphy.Client
 }
 
 type data struct {
@@ -93,6 +95,7 @@ func main() {
 		chatContexts: chatContexts,
 		llmChan:      make(chan *data, 1),
 		startTime:    time.Now(),
+		giphy: 		  giphy.NewClient(giphy.APIKey(config.GiphyAPIKey), giphy.Rating("r")),
 	}
 
 	// Handlers

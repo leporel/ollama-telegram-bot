@@ -12,5 +12,6 @@
     "goodbyeMessage": "Goodbye!",
     "triggerWords": ["@super_bot", "assistant"],
     "historySize": 50,
-    "enableSaveHistory": false
+    "enableSaveHistory": false,
+    "giphyAPIKey": ""
 }

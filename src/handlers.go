@@ -25,6 +25,8 @@ var botMentionKey = "self_mention"
 // Регулярное выражение для поиска всех форматов URL: http://, https://, www.
 var regexLinks = regexp.MustCompile(`\b(?:http|https|www)\S+`)
 
+var regexGif = regexp.MustCompile(`\[gif\]\((.*?)\)`)
+
 // Deny messages from not witelisted users and chats
 func validateChat(config *Config, c telebot.Context) bool {
 	chatID := c.Chat().ID
@@ -420,14 +422,36 @@ func (b *bot) handleMessage(c telebot.Context) error {
 	}
 
 	replayMesage = b.processOutputMessage(replayMesage)
+	var replay any
+	var storeReplay bool
 
-	err := c.Send(escapeMarkdownV2(replayMesage), replayOpts)
+	switch {
+		case regexGif.MatchString(replayMesage): 
+			match := regexGif.FindStringSubmatch(replayMesage)
+			if len(match) > 1 {
+				res, err := b.giphy.Translate(strings.Split(match[1], " "))
+				if err != nil {
+				  log.Printf("Error: %v", err)
+				  return nil
+				}
+	
+				replay = &telebot.Animation{File: telebot.File{FileURL: res.Data.MediaURL()}, Caption: "Powered by GIPHY"}
+			}
+		
+		default:
+			replay = escapeMarkdownV2(replayMesage)
+			storeReplay = true
+	}
+
+	err := c.Send(replay, replayOpts)
 	if err != nil {
-		log.Printf("Send replay error: %v, replay string: %v\n", err, replayMesage)
+		log.Printf("Send replay error: %v, replay string: %v\n", err, replay)
 		return err
 	}
 
-	b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: replayMesage})
+	if storeReplay {
+		b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: replayMesage})
+	}
 
 	return nil
 }

@@ -11,5 +11,6 @@ require (
 
 require (
 	github.com/andybalholm/cascadia v1.3.2 // indirect
+	github.com/peterhellberg/giphy v0.0.2 // indirect
 	golang.org/x/net v0.32.0 // indirect
 )
