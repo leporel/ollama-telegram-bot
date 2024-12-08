@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/jeromeberg/ollama-telegram-bot/src/ollama"
 
 	// TODO v4 ?
@@ -83,11 +84,70 @@ func (b *bot) isNeedProcess(message string, c telebot.Context) bool {
 	return false
 }
 
+func fetchPreview(link string) string {
+
+	// check url for valid
+	u, err := url.Parse(link)
+	if err != nil || u.Scheme == "" || u.Scheme != "https" || u.Host == "" {
+		return ""
+	}
+	// check if url not localhost or local ip's
+	if u.Host == "localhost" || strings.HasPrefix(u.Host, "127.0.0.") || strings.HasPrefix(u.Host, "192.168.") {
+		return ""
+	}
+
+	previewText := ""
+
+	// Fetch preview text from URL
+	resp, err := http.Get(u.String())
+	if err != nil {
+		log.Printf("Error fetching preview: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error fetching preview: %v", err)
+		return ""
+	}
+
+	// Parse the HTML content and extract text from <header title> and <header description>
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(bodyBytes))
+	if err != nil {
+		log.Printf("Error parsing HTML: %v", err)
+		return ""
+	}
+
+	title := doc.Find("title").Text()
+	description := doc.Find("meta[name=description]").AttrOr("content", "")
+
+	if title != "" {
+		previewText += fmt.Sprintf("*%s*\n", title)
+	}
+	if description != "" {
+		previewText += fmt.Sprintf(" - %s\n", description)
+	}
+
+	return previewText
+}
+
 func (b *bot) processInputMessage(c telebot.Context) string {
 	message := c.Text()
 
 	message = strings.TrimSpace(removeLinks(message))
 	message = strings.TrimSpace(message)
+
+	if c.Message().PreviewOptions != nil && !c.Message().PreviewOptions.Disabled {
+		if c.Message().PreviewOptions.URL != "" {
+
+			previewText := fetchPreview(c.Message().PreviewOptions.URL)
+
+			if previewText != "" {
+				message = fmt.Sprintf("User send link with text: %s", previewText)
+			}
+		}
+	}
 
 	if message == "" {
 		return ""
@@ -170,7 +230,6 @@ func (b *bot) processOutputMessage(msg string) string {
 	return replayMesage
 }
 
-
 func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
 	systemMessage := ollama.MakeMessage(string(UserTypeSystem), b.config.SystemPrompt)
 
@@ -180,7 +239,7 @@ func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
 		messages = append(messages, ollama.MakeMessage(string(msg.UserType), msg.Message))
 	}
 
-	messages = append(messages, ollama.MakeMessage(string(newMsg.UserType),newMsg.Message))
+	messages = append(messages, ollama.MakeMessage(string(newMsg.UserType), newMsg.Message))
 
 	payload := &ollama.ChatRequest{
 		Model:    b.config.Model,
@@ -198,12 +257,10 @@ func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
 	return payload
 }
 
-
 func handlers(tgBot *telebot.Bot, bot *bot) {
 	tgBot.Handle(telebot.OnText, bot.botMiddleware(bot.handleMessage))
 	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
 }
-
 
 func (b *bot) handleMessage(c telebot.Context) error {
 
@@ -242,7 +299,7 @@ func (b *bot) handleMessage(c telebot.Context) error {
 	response := make(chan string)
 	defer close(response)
 
-	payload :=b.makeChatRequest(newMessage)
+	payload := b.makeChatRequest(newMessage)
 	b.llmChan <- &data{payload, c, response}
 
 	replayMesage := <-response
@@ -347,12 +404,11 @@ func (b *bot) sendRequestOllama(payload *ollama.ChatRequest) (string, error) {
 	return res, nil
 }
 
-
 func (b *bot) SendMessageToChatGroup(chatID int64, msg string) error {
 	if chatID != 0 {
 		if _, err := b.tgBot.Send(&telebot.Chat{ID: chatID}, msg, telebot.Silent); err != nil {
 			return fmt.Errorf("Cant send message: %v", err)
-		} 
+		}
 		if b.config.EnableLog {
 			log.Printf("Message sent to chat group: %v msg: %v \n", chatID, msg)
 		}
@@ -410,7 +466,7 @@ func escapeMarkdownV2(text string) string {
 
 			part = strings.ReplaceAll(part, "\\", "\\\\")
 			part = strings.ReplaceAll(part, ")", "\\)")
-			
+
 			link = strings.Replace(link, match[1], part, 1)
 			linkMap[placeholder] = link
 		}
@@ -432,7 +488,7 @@ func escapeMarkdownV2(text string) string {
 
 		code = strings.ReplaceAll(code, "\\", "\\\\")
 		code = strings.ReplaceAll(code, "`", "\\`")
-		
+
 		inlineCodeMap[placeholder] = "`" + code + "`"
 	}
 
