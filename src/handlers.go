@@ -251,7 +251,7 @@ func (b *bot) processOutputMessage(msg string) string {
 	isRemoveFromReplay := strings.Index(replayMesage, b.config.RemoveFromReplay)
 	replayMesage = strings.ReplaceAll(replayMesage, b.config.RemoveFromReplay, "")
 	// TODO remove (fix when message contains different substr (exmaple - "Assistant:" got - "Ассистант:" ))
-	if isRemoveFromReplay < -1 {
+	if isRemoveFromReplay == -1 {
 		index := strings.Index(replayMesage, ":")
 		if (index != -1 && index != 0) && index < 20 {
 			replayMesage = replayMesage[index+1:]
@@ -421,7 +421,7 @@ func (b *bot) makeReplay(replayMesage string) (any, bool) {
 				return nil, false
 			}
 
-			replay = &telebot.Animation{File: telebot.File{FileURL: res.Data.MediaURL()}, Caption: fmt.Sprintf("_%s_\n`%s`", match[1], "Powered by GIPHY")}
+			replay = &telebot.Animation{File: telebot.File{FileURL: res.Data.MediaURL()}, Caption: fmt.Sprintf("_%s_\n`%s`", escapeMarkdownV2(match[1]), "Powered by GIPHY")}
 		}
 
 	default:
