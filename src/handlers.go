@@ -24,9 +24,16 @@ import (
 var botMentionKey = "self_mention"
 
 // Регулярное выражение для поиска всех форматов URL: http://, https://, www.
-var regexLinks = regexp.MustCompile(`\b(?:http|https|www)\S+`)
+var regexLinks = regexp.MustCompile(`(?mi)\b(?:http|https|www)\S+`)
 
-var regexGif = regexp.MustCompile(`\[gif\]\((.*?)\)`)
+var regexGif = regexp.MustCompile(`(?mi)\[(?:gif|гиф)\s*-\s*(.*?)\]`)
+
+
+func handlers(tgBot *telebot.Bot, bot *bot) {
+	tgBot.Handle(telebot.OnText, bot.botMiddleware(bot.handleMessage))
+	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
+}
+
 
 // Deny messages from not witelisted users and chats
 func validateChat(config *Config, c telebot.Context) bool {
@@ -254,36 +261,7 @@ func (b *bot) processOutputMessage(msg string) string {
 	return replayMesage
 }
 
-func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
-	systemMessage := ollama.MakeMessage(string(UserTypeSystem), b.config.SystemPrompt)
 
-	if len(b.chatContexts.Memory.Data) > 0 {
-		systemMessage.Content = fmt.Sprintf("%s\nТебя просили запомнить:\n%s", systemMessage.Content, b.chatContexts.Memory.GetList())
-	}
-
-	messages := []ollama.Message{systemMessage}
-
-	for _, msg := range b.chatContexts.History.GetAll() {
-		messages = append(messages, ollama.MakeMessage(string(msg.UserType), msg.Message))
-	}
-
-	messages = append(messages, ollama.MakeMessage(string(newMsg.UserType), newMsg.Message))
-
-	payload := &ollama.ChatRequest{
-		Model:    b.config.Model,
-		Messages: messages,
-		AdvancedParams: ollama.AdvancedParams{
-			Options: &ollama.Options{
-				Temperature: b.config.Temperature,
-				NumCtx:      b.config.NumCtx,
-			},
-			Stream: false,
-			// Format: "json",
-		},
-	}
-
-	return payload
-}
 
 func (b *bot) processCommands(c telebot.Context) (string, bool) {
 	isMentioned, ok := c.Get(botMentionKey).(bool)
@@ -356,10 +334,6 @@ func (b *bot) processCommands(c telebot.Context) (string, bool) {
 	return "", false
 }
 
-func handlers(tgBot *telebot.Bot, bot *bot) {
-	tgBot.Handle(telebot.OnText, bot.botMiddleware(bot.handleMessage))
-	tgBot.Handle(telebot.OnMedia, bot.botMiddleware(bot.handleMessage))
-}
 
 func (b *bot) handleMessage(c telebot.Context) error {
 	cmdResult, cmdOk := b.processCommands(c)
@@ -418,26 +392,8 @@ func (b *bot) handleMessage(c telebot.Context) error {
 	}
 
 	replayMesage = b.processOutputMessage(replayMesage)
-	var replay any
-	var storeReplay bool
 
-	switch {
-	case regexGif.MatchString(replayMesage):
-		match := regexGif.FindStringSubmatch(replayMesage)
-		if len(match) > 1 {
-			res, err := b.giphy.Translate(strings.Split(match[1], " "))
-			if err != nil {
-				log.Printf("Error: %v", err)
-				return nil
-			}
-
-			replay = &telebot.Animation{File: telebot.File{FileURL: res.Data.MediaURL()}, Caption: "Powered by GIPHY"}
-		}
-
-	default:
-		replay = replayMesage
-		storeReplay = true
-	}
+	replay, storeReplay := b.makeReplay(replayMesage)
 
 	err := b.send(replay, c)
 	if err != nil {
@@ -449,6 +405,31 @@ func (b *bot) handleMessage(c telebot.Context) error {
 	}
 
 	return nil
+}
+
+func (b *bot) makeReplay(replayMesage string) (any, bool) {
+	var replay any
+	var storeReplay bool
+
+	switch {
+	case regexGif.MatchString(replayMesage):
+		match := regexGif.FindStringSubmatch(replayMesage)
+		if len(match) > 1 {
+			res, err := b.giphy.Translate(strings.Split(match[1], " "))
+			if err != nil {
+				log.Printf("Error: %v", err)
+				return nil, false
+			}
+
+			replay = &telebot.Animation{File: telebot.File{FileURL: res.Data.MediaURL()}, Caption: fmt.Sprintf("_%s_\n`%s`", match[1], "Powered by GIPHY")}
+		}
+
+	default:
+		replay = replayMesage
+		storeReplay = true
+	}
+
+	return replay, storeReplay
 }
 
 func (b *bot) send(replay any, c telebot.Context) error {
@@ -489,6 +470,50 @@ func (b *bot) send(replay any, c telebot.Context) error {
 	}
 
 	return nil
+}
+
+func (b *bot) SendMessageToChatGroup(chatID int64, msg string) error {
+	if chatID != 0 {
+		if _, err := b.tgBot.Send(&telebot.Chat{ID: chatID}, msg, telebot.Silent); err != nil {
+			return fmt.Errorf("Cant send message: %v", err)
+		}
+		if b.config.EnableLog {
+			log.Printf("Message sent to chat group: %v msg: %v \n", chatID, msg)
+		}
+	}
+	b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: msg})
+	return nil
+}
+
+func (b *bot) makeChatRequest(newMsg Message) *ollama.ChatRequest {
+	systemMessage := ollama.MakeMessage(string(UserTypeSystem), b.config.SystemPrompt)
+
+	if len(b.chatContexts.Memory.Data) > 0 {
+		systemMessage.Content = fmt.Sprintf("%s\nТебя просили запомнить:\n%s", systemMessage.Content, b.chatContexts.Memory.GetList())
+	}
+
+	messages := []ollama.Message{systemMessage}
+
+	for _, msg := range b.chatContexts.History.GetAll() {
+		messages = append(messages, ollama.MakeMessage(string(msg.UserType), msg.Message))
+	}
+
+	messages = append(messages, ollama.MakeMessage(string(newMsg.UserType), newMsg.Message))
+
+	payload := &ollama.ChatRequest{
+		Model:    b.config.Model,
+		Messages: messages,
+		AdvancedParams: ollama.AdvancedParams{
+			Options: &ollama.Options{
+				Temperature: b.config.Temperature,
+				NumCtx:      b.config.NumCtx,
+			},
+			Stream: false,
+			// Format: "json",
+		},
+	}
+
+	return payload
 }
 
 func (b *bot) processOllama() {
@@ -566,19 +591,6 @@ func (b *bot) sendRequestOllama(payload *ollama.ChatRequest) (string, error) {
 	}
 
 	return res, nil
-}
-
-func (b *bot) SendMessageToChatGroup(chatID int64, msg string) error {
-	if chatID != 0 {
-		if _, err := b.tgBot.Send(&telebot.Chat{ID: chatID}, msg, telebot.Silent); err != nil {
-			return fmt.Errorf("Cant send message: %v", err)
-		}
-		if b.config.EnableLog {
-			log.Printf("Message sent to chat group: %v msg: %v \n", chatID, msg)
-		}
-	}
-	b.chatContexts.History.Add(Message{UserType: UserTypeAI, Message: msg})
-	return nil
 }
 
 // Регулярное выражение для поиска части (...) встроенных ссылок и кастомных эмодзи

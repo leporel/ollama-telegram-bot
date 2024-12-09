@@ -119,16 +119,16 @@ func main() {
 		log.Println("Received interrupt signal:", s)
 		log.Println("Stopping bot...")
 
-		// Send goodbye to chat group
-		err = chatBot.SendMessageToChatGroup(config.ChatGroupID, config.GoodbyeMessage)
-		if err != nil {
-			log.Println(err)
-		}
-
 		if config.EnableSaveHistory {
 			if err = chatContexts.SaveToFile(); err != nil {
 				log.Println(err)
 			}
+		}
+
+		// Send goodbye to chat group
+		err = chatBot.SendMessageToChatGroup(config.ChatGroupID, config.GoodbyeMessage)
+		if err != nil {
+			log.Println(err)
 		}
 
 		tgBot.Stop()
